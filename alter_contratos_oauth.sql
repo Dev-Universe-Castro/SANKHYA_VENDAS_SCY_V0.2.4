@@ -1,0 +1,14 @@
+
+-- Adicionar colunas para OAuth 2.0
+ALTER TABLE AD_CONTRATOS ADD (
+  AUTH_TYPE VARCHAR2(20) DEFAULT 'LEGACY' CHECK (AUTH_TYPE IN ('LEGACY', 'OAUTH2')),
+  OAUTH_CLIENT_ID VARCHAR2(500),
+  OAUTH_CLIENT_SECRET VARCHAR2(500),
+  OAUTH_X_TOKEN VARCHAR2(500)
+);
+
+-- Comentários
+COMMENT ON COLUMN AD_CONTRATOS.AUTH_TYPE IS 'Tipo de autenticação: LEGACY (token/appkey/username/password) ou OAUTH2 (client_id/client_secret)';
+COMMENT ON COLUMN AD_CONTRATOS.OAUTH_CLIENT_ID IS 'Client ID para autenticação OAuth 2.0';
+COMMENT ON COLUMN AD_CONTRATOS.OAUTH_CLIENT_SECRET IS 'Client Secret para autenticação OAuth 2.0';
+COMMENT ON COLUMN AD_CONTRATOS.OAUTH_X_TOKEN IS 'X-Token header para autenticação OAuth 2.0';

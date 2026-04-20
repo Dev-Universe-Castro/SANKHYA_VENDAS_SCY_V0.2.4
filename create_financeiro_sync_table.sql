@@ -1,0 +1,81 @@
+
+-- Script para criar a tabela AS_FINANCEIRO no Oracle
+-- Tabela responsável por armazenar os títulos financeiros sincronizados de cada empresa
+
+-- Criar a tabela AS_FINANCEIRO
+CREATE TABLE AS_FINANCEIRO (
+    ID_SISTEMA NUMBER NOT NULL,
+    NUFIN NUMBER NOT NULL,
+    CODPARC NUMBER,
+    CODEMP NUMBER,
+    VLRDESDOB NUMBER(15,2),
+    DTVENC DATE,
+    DTNEG DATE,
+    PROVISAO CHAR(1),
+    DHBAIXA TIMESTAMP,
+    VLRBAIXA NUMBER(15,2),
+    RECDESP NUMBER(1),
+    NOSSONUM VARCHAR2(50),
+    CODCTABCOINT NUMBER,
+    HISTORICO VARCHAR2(500),
+    NUMNOTA NUMBER,
+    SANKHYA_ATUAL CHAR(1) DEFAULT 'S' CHECK (SANKHYA_ATUAL IN ('S', 'N')),
+    DT_ULT_CARGA TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    DT_CRIACAO TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_as_financeiro PRIMARY KEY (ID_SISTEMA, NUFIN),
+    CONSTRAINT fk_as_financeiro_empresa FOREIGN KEY (ID_SISTEMA) REFERENCES AD_CONTRATOS(ID_EMPRESA) ON DELETE CASCADE
+);
+
+-- Criar índices para melhorar performance
+CREATE INDEX idx_as_financeiro_sistema ON AS_FINANCEIRO(ID_SISTEMA);
+CREATE INDEX idx_as_financeiro_atual ON AS_FINANCEIRO(SANKHYA_ATUAL);
+CREATE INDEX idx_as_financeiro_codparc ON AS_FINANCEIRO(CODPARC);
+CREATE INDEX idx_as_financeiro_dtvenc ON AS_FINANCEIRO(DTVENC);
+CREATE INDEX idx_as_financeiro_dtneg ON AS_FINANCEIRO(DTNEG);
+CREATE INDEX idx_as_financeiro_carga ON AS_FINANCEIRO(DT_ULT_CARGA);
+CREATE INDEX idx_as_financeiro_recdesp ON AS_FINANCEIRO(RECDESP);
+
+-- Criar trigger para atualizar DT_ULT_CARGA automaticamente
+CREATE OR REPLACE TRIGGER trg_financeiro_atualizacao
+BEFORE UPDATE ON AS_FINANCEIRO
+FOR EACH ROW
+BEGIN
+    :NEW.DT_ULT_CARGA := CURRENT_TIMESTAMP;
+END;
+/
+
+-- Comentários nas colunas
+COMMENT ON TABLE AS_FINANCEIRO IS 'Tabela de sincronização de títulos financeiros do Sankhya por empresa';
+COMMENT ON COLUMN AS_FINANCEIRO.ID_SISTEMA IS 'Identificador da empresa (segregador multi-tenant)';
+COMMENT ON COLUMN AS_FINANCEIRO.NUFIN IS 'Número único do financeiro';
+COMMENT ON COLUMN AS_FINANCEIRO.CODPARC IS 'Código do parceiro';
+COMMENT ON COLUMN AS_FINANCEIRO.CODEMP IS 'Código da empresa';
+COMMENT ON COLUMN AS_FINANCEIRO.VLRDESDOB IS 'Valor desdobrado';
+COMMENT ON COLUMN AS_FINANCEIRO.DTVENC IS 'Data de vencimento';
+COMMENT ON COLUMN AS_FINANCEIRO.DTNEG IS 'Data de negociação';
+COMMENT ON COLUMN AS_FINANCEIRO.PROVISAO IS 'Indicador de provisão';
+COMMENT ON COLUMN AS_FINANCEIRO.DHBAIXA IS 'Data e hora da baixa';
+COMMENT ON COLUMN AS_FINANCEIRO.VLRBAIXA IS 'Valor da baixa';
+COMMENT ON COLUMN AS_FINANCEIRO.RECDESP IS 'Receita (1) ou Despesa (-1)';
+COMMENT ON COLUMN AS_FINANCEIRO.NOSSONUM IS 'Nosso número';
+COMMENT ON COLUMN AS_FINANCEIRO.CODCTABCOINT IS 'Código da conta bancária';
+COMMENT ON COLUMN AS_FINANCEIRO.HISTORICO IS 'Histórico do título';
+COMMENT ON COLUMN AS_FINANCEIRO.NUMNOTA IS 'Número da nota';
+COMMENT ON COLUMN AS_FINANCEIRO.SANKHYA_ATUAL IS 'Indica se o registro está ativo no Sankhya (S=Sim, N=Soft Delete)';
+COMMENT ON COLUMN AS_FINANCEIRO.DT_ULT_CARGA IS 'Data da última sincronização deste registro';
+COMMENT ON COLUMN AS_FINANCEIRO.DT_CRIACAO IS 'Data de criação do registro na tabela';
+
+-- Criar view para consultar apenas títulos financeiros ativos
+CREATE OR REPLACE VIEW VW_FINANCEIRO_ATIVOS AS
+SELECT 
+    f.*,
+    c.EMPRESA,
+    c.CNPJ
+FROM AS_FINANCEIRO f
+INNER JOIN AD_CONTRATOS c ON f.ID_SISTEMA = c.ID_EMPRESA
+WHERE f.SANKHYA_ATUAL = 'S'
+  AND c.ATIVO = 'S';
+
+COMMENT ON VIEW VW_FINANCEIRO_ATIVOS IS 'View de títulos financeiros ativos sincronizados';
+
+COMMIT;

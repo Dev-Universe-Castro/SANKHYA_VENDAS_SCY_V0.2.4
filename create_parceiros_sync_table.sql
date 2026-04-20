@@ -1,0 +1,85 @@
+
+-- Script para criar a tabela AS_PARCEIROS no Oracle
+-- Tabela responsável por armazenar os parceiros sincronizados de cada empresa
+
+-- Criar a tabela AS_PARCEIROS
+CREATE TABLE AS_PARCEIROS (
+    ID_SISTEMA NUMBER NOT NULL,
+    CODPARC NUMBER NOT NULL,
+    NOMEPARC VARCHAR2(200),
+    CGC_CPF VARCHAR2(18),
+    CODCID NUMBER,
+    ATIVO CHAR(1),
+    TIPPESSOA CHAR(1),
+    RAZAOSOCIAL VARCHAR2(200),
+    IDENTINSCESTAD VARCHAR2(20),
+    CEP VARCHAR2(10),
+    CODEND NUMBER,
+    NUMEND VARCHAR2(10),
+    COMPLEMENTO VARCHAR2(60),
+    CODBAI NUMBER,
+    LATITUDE VARCHAR2(20),
+    LONGITUDE VARCHAR2(20),
+    CLIENTE CHAR(1),
+    CODVEND NUMBER,
+    CODREG NUMBER,
+    CODTAB NUMBER,
+    DTALTER TIMESTAMP,
+    SANKHYA_ATUAL CHAR(1) DEFAULT 'S' CHECK (SANKHYA_ATUAL IN ('S', 'N')),
+    DT_ULT_CARGA TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    DT_CRIACAO TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_as_parceiros PRIMARY KEY (ID_SISTEMA, CODPARC),
+    CONSTRAINT fk_as_parceiros_empresa FOREIGN KEY (ID_SISTEMA) REFERENCES AD_CONTRATOS(ID_EMPRESA) ON DELETE CASCADE
+);
+
+-- Criar índices para melhorar performance
+CREATE INDEX idx_as_parceiros_sistema ON AS_PARCEIROS(ID_SISTEMA);
+CREATE INDEX idx_as_parceiros_atual ON AS_PARCEIROS(SANKHYA_ATUAL);
+CREATE INDEX idx_as_parceiros_nome ON AS_PARCEIROS(NOMEPARC);
+CREATE INDEX idx_as_parceiros_cpf ON AS_PARCEIROS(CGC_CPF);
+CREATE INDEX idx_as_parceiros_cliente ON AS_PARCEIROS(CLIENTE);
+CREATE INDEX idx_as_parceiros_vendedor ON AS_PARCEIROS(CODVEND);
+CREATE INDEX idx_as_parceiros_regiao ON AS_PARCEIROS(CODREG);
+CREATE INDEX idx_as_parceiros_carga ON AS_PARCEIROS(DT_ULT_CARGA);
+
+-- Criar trigger para atualizar DT_ULT_CARGA automaticamente
+CREATE OR REPLACE TRIGGER trg_parceiros_atualizacao
+BEFORE UPDATE ON AS_PARCEIROS
+FOR EACH ROW
+BEGIN
+    :NEW.DT_ULT_CARGA := CURRENT_TIMESTAMP;
+END;
+/
+
+-- Comentários nas colunas
+COMMENT ON TABLE AS_PARCEIROS IS 'Tabela de sincronização de parceiros do Sankhya por empresa';
+COMMENT ON COLUMN AS_PARCEIROS.ID_SISTEMA IS 'Identificador da empresa (segregador multi-tenant)';
+COMMENT ON COLUMN AS_PARCEIROS.CODPARC IS 'Código do parceiro no Sankhya';
+COMMENT ON COLUMN AS_PARCEIROS.NOMEPARC IS 'Nome do parceiro';
+COMMENT ON COLUMN AS_PARCEIROS.CGC_CPF IS 'CPF ou CNPJ do parceiro';
+COMMENT ON COLUMN AS_PARCEIROS.CODCID IS 'Código da cidade';
+COMMENT ON COLUMN AS_PARCEIROS.ATIVO IS 'Status ativo/inativo';
+COMMENT ON COLUMN AS_PARCEIROS.TIPPESSOA IS 'Tipo de pessoa (F=Física, J=Jurídica)';
+COMMENT ON COLUMN AS_PARCEIROS.RAZAOSOCIAL IS 'Razão social';
+COMMENT ON COLUMN AS_PARCEIROS.CLIENTE IS 'Indica se é cliente (S/N)';
+COMMENT ON COLUMN AS_PARCEIROS.CODVEND IS 'Código do vendedor preferencial';
+COMMENT ON COLUMN AS_PARCEIROS.CODREG IS 'Código da região no Sankhya';
+COMMENT ON COLUMN AS_PARCEIROS.CODTAB IS 'Código da tabela de preços preferencial';
+COMMENT ON COLUMN AS_PARCEIROS.SANKHYA_ATUAL IS 'Indica se o registro está ativo no Sankhya (S=Sim, N=Soft Delete)';
+COMMENT ON COLUMN AS_PARCEIROS.DT_ULT_CARGA IS 'Data da última sincronização deste registro';
+COMMENT ON COLUMN AS_PARCEIROS.DT_CRIACAO IS 'Data de criação do registro na tabela';
+
+-- Criar view para consultar apenas parceiros ativos
+CREATE OR REPLACE VIEW VW_PARCEIROS_ATIVOS AS
+SELECT 
+    p.*,
+    c.EMPRESA,
+    c.CNPJ
+FROM AS_PARCEIROS p
+INNER JOIN AD_CONTRATOS c ON p.ID_SISTEMA = c.ID_EMPRESA
+WHERE p.SANKHYA_ATUAL = 'S'
+  AND c.ATIVO = 'S';
+
+COMMENT ON VIEW VW_PARCEIROS_ATIVOS IS 'View de parceiros ativos sincronizados';
+
+COMMIT;
