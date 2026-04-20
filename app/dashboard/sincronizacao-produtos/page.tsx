@@ -1,0 +1,507 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { authService } from "@/lib/auth-service"
+import DashboardLayout from "@/components/dashboard-layout"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/components/ui/use-toast"
+import { RefreshCw, Clock, Database, Package, ListOrdered } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+
+interface Contrato {
+  ID_EMPRESA: number
+  EMPRESA: string
+  CNPJ: string
+  ATIVO: boolean
+  SYNC_ATIVO: boolean
+}
+
+interface EstatisticaSync {
+  ID_SISTEMA: number
+  TOTAL_REGISTROS: number
+  REGISTROS_ATIVOS: number
+  REGISTROS_DELETADOS: number
+  ULTIMA_SINCRONIZACAO: string
+}
+
+interface SyncResult {
+  success: boolean
+  idSistema: number
+  empresa: string;
+  totalRegistros: number
+  registrosInseridos: number
+  registrosAtualizados: number
+  registrosDeletados: number
+  dataInicio: string
+  dataFim: string
+  duracao: number
+  erro?: string
+}
+
+export default function SincronizacaoProdutosPage() {
+  const router = useRouter()
+  const { toast } = useToast()
+  const [contratos, setContratos] = useState<Contrato[]>([])
+  const [estatisticas, setEstatisticas] = useState<Map<number, EstatisticaSync>>(new Map())
+  const [produtos, setProdutos] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [syncingAll, setSyncingAll] = useState(false)
+  const [syncingOne, setSyncingOne] = useState<number | null>(null)
+  const [isPageDialogOpen, setIsPageDialogOpen] = useState(false)
+  const [selectedContrato, setSelectedContrato] = useState<Contrato | null>(null)
+  const [startPage, setStartPage] = useState<string>("0")
+
+  useEffect(() => {
+    const checkAuth = () => {
+      const user = authService.getCurrentUser()
+      if (!user) {
+        router.push("/login")
+      }
+    }
+    checkAuth()
+    loadData()
+  }, [router])
+
+  const loadData = async () => {
+    try {
+      setLoading(true)
+
+      const contratosRes = await fetch('/api/contratos')
+      if (contratosRes.ok) {
+        const contratosData = await contratosRes.json()
+        setContratos(contratosData.filter((c: Contrato) => c.ATIVO))
+      }
+
+      const statsRes = await fetch('/api/sync/produtos')
+      if (statsRes.ok) {
+        const statsData = await statsRes.json()
+        const statsMap = new Map<number, EstatisticaSync>()
+        statsData.forEach((stat: EstatisticaSync) => {
+          statsMap.set(stat.ID_SISTEMA, stat)
+        })
+        setEstatisticas(statsMap)
+      }
+
+      fetch('/api/sync/produtos?list=true')
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setProdutos(data);
+          } else {
+            console.error('Dados de produtos inválidos:', data);
+            setProdutos([]);
+          }
+        })
+        .catch(console.error)
+
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error)
+      toast({
+        title: "Erro",
+        description: "Erro ao carregar dados de sincronização",
+        variant: "destructive"
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const sincronizarTodas = async () => {
+    try {
+      setSyncingAll(true)
+      toast({
+        title: "Sincronização iniciada",
+        description: "Sincronizando produtos de todas as empresas..."
+      })
+
+      const response = await fetch('/api/sync/produtos', {
+        method: 'POST'
+      })
+
+      if (!response.ok) {
+        throw new Error('Erro ao sincronizar')
+      }
+
+      toast({
+        title: "Processo iniciado",
+        description: "A sincronização continuará em segundo plano.",
+      })
+
+      setTimeout(() => loadData(), 2000)
+
+    } catch (error) {
+      console.error('Erro ao sincronizar:', error)
+      toast({
+        title: "Erro",
+        description: "Erro ao iniciar sincronização",
+        variant: "destructive"
+      })
+    } finally {
+      setSyncingAll(false)
+    }
+  }
+
+  const sincronizarEmpresa = async (idSistema: number, empresa: string, type: 'total' | 'partial' = 'total', startPage?: number) => {
+    try {
+      setSyncingOne(idSistema)
+      toast({
+        title: startPage !== undefined ? `Retomada iniciada` : `Sincronização ${type === 'partial' ? 'Parcial' : 'Total'} iniciada`,
+        description: `Sincronizando ${empresa}${startPage !== undefined ? ` a partir da página ${startPage}` : ''}...`
+      })
+
+      const response = await fetch('/api/sync/produtos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ idSistema, empresa, type, startPage }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Erro ao sincronizar')
+      }
+
+      const resultado: SyncResult = await response.json()
+
+      if (resultado.success) {
+        toast({
+          title: "Sincronização concluída",
+          description: `${resultado.totalRegistros} registros processados`,
+        })
+      } else {
+        toast({
+          title: "Erro na sincronização",
+          description: resultado.erro || "Erro desconhecido",
+          variant: "destructive"
+        })
+      }
+
+      await loadData()
+    } catch (error) {
+      console.error('Erro ao sincronizar:', error)
+      toast({
+        title: "Erro",
+        description: "Erro ao sincronizar empresa",
+        variant: "destructive"
+      })
+    } finally {
+      setSyncingOne(null)
+    }
+  }
+
+  const formatarData = (dataStr: string) => {
+    if (!dataStr) return 'Nunca sincronizado'
+    const data = new Date(dataStr)
+    return data.toLocaleString('pt-BR')
+  }
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-96">
+          <RefreshCw className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6 p-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">Sincronização de Produtos</h1>
+            <p className="text-muted-foreground mt-2">
+              Gerencie a sincronização de Produtos entre Sankhya e o Oracle.
+            </p>
+          </div>
+          <Button
+            onClick={sincronizarTodas}
+            disabled={syncingAll || syncingOne !== null}
+            className="gap-2"
+          >
+            {syncingAll ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Sincronizando...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-4 h-4" />
+                Sincronizar Todas
+              </>
+            )}
+          </Button>
+        </div>
+
+        <div className="grid gap-6 md:grid-cols-3">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total de Produtos</CardTitle>
+              <Package className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {Array.from(estatisticas.values()).reduce((acc, curr) => acc + curr.REGISTROS_ATIVOS, 0)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Produtos ativos sincronizados
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Empresas Cadastradas (Contratos)</CardTitle>
+            <CardDescription>
+              Status de sincronização dos produtos por contrato.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {contratos.length === 0 ? (
+              <div className="text-center py-12">
+                <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                <p className="text-lg font-medium">Nenhuma empresa ativa encontrada</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Empresa (Contrato)</TableHead>
+                      <TableHead>CNPJ</TableHead>
+                      <TableHead className="text-center">Total Sync</TableHead>
+                      <TableHead className="text-center">Ativos</TableHead>
+                      <TableHead>Última Sync</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {contratos.map((contrato) => {
+                      const stats = estatisticas.get(contrato.ID_EMPRESA)
+                      const isSyncing = syncingOne === contrato.ID_EMPRESA
+
+                      return (
+                        <TableRow key={contrato.ID_EMPRESA}>
+                          <TableCell>
+                            <Badge variant="outline">{contrato.ID_EMPRESA}</Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">{contrato.EMPRESA}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {contrato.CNPJ}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {stats ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <Database className="w-4 h-4 text-muted-foreground" />
+                                <span className="font-semibold">{stats.TOTAL_REGISTROS}</span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {stats ? (
+                              <span className="font-semibold text-green-600">
+                                {stats.REGISTROS_ATIVOS}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2 text-xs">
+                              <Clock className="w-3 h-3 text-muted-foreground" />
+                              <span className="text-muted-foreground">
+                                {stats ? formatarData(stats.ULTIMA_SINCRONIZACAO) : 'Nunca'}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                onClick={() => sincronizarEmpresa(contrato.ID_EMPRESA, contrato.EMPRESA, 'total')}
+                                disabled={isSyncing || syncingAll || contrato.SYNC_ATIVO}
+                                size="sm"
+                                variant="outline"
+                                title="Sincronização Total"
+                              >
+                                {isSyncing ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <RefreshCw className="w-4 h-4 mr-1" />
+                                    Total
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setSelectedContrato(contrato)
+                                  setIsPageDialogOpen(true)
+                                }}
+                                disabled={isSyncing || syncingAll || contrato.SYNC_ATIVO}
+                                size="sm"
+                                variant="outline"
+                                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                title="Sincronização por Página"
+                              >
+                                {isSyncing ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <ListOrdered className="w-4 h-4 mr-1" />
+                                    Paginação
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                onClick={() => sincronizarEmpresa(contrato.ID_EMPRESA, contrato.EMPRESA, 'partial')}
+                                disabled={isSyncing || syncingAll || contrato.SYNC_ATIVO}
+                                size="sm"
+                                variant="secondary"
+                                title="Sincronização Parcial"
+                              >
+                                {isSyncing ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <Clock className="w-4 h-4 mr-1" />
+                                    Parcial
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Dialog open={isPageDialogOpen} onOpenChange={setIsPageDialogOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Sincronização por Página (Produtos)</DialogTitle>
+              <DialogDescription>
+                Escolha a página inicial para a sincronização de produtos de <strong>{selectedContrato?.EMPRESA}</strong>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="page" className="text-right">
+                  Página Inicial
+                </Label>
+                <Input
+                  id="page"
+                  type="number"
+                  value={startPage}
+                  onChange={(e) => setStartPage(e.target.value)}
+                  className="col-span-3"
+                  min="0"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground bg-yellow-50 p-2 rounded border border-yellow-200">
+                Atenção: A sincronização por página ignora o reset inicial (Soft Delete) e apenas atualiza/insere produtos encontrados a partir da página informada.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsPageDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  if (selectedContrato) {
+                    sincronizarEmpresa(selectedContrato.ID_EMPRESA, selectedContrato.EMPRESA, 'total', Number(startPage))
+                    setIsPageDialogOpen(false)
+                  }
+                }}
+              >
+                Iniciar Sincronização
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Produtos Sincronizados (Detalhes)</CardTitle>
+            <CardDescription>
+              Lista de produtos sincronizados do Sankhya (últimos 500).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cód. Produto</TableHead>
+                    <TableHead>Descrição</TableHead>
+                    <TableHead>Contrato Origem</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Atualizado em</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {produtos.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                        Nenhum produto sincronizado encontrado.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    produtos.map((produto) => (
+                      <TableRow key={`${produto.ID_SISTEMA}-${produto.CODPROD}`}>
+                        <TableCell>{produto.CODPROD}</TableCell>
+                        <TableCell>{produto.DESCRPROD}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {produto.NOME_CONTRATO} (ID: {produto.ID_SISTEMA})
+                        </TableCell>
+                        <TableCell>
+                          {produto.SANKHYA_ATUAL === 'S' ? (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Ativo</Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">Inativo</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatarData(produto.DT_ULT_CARGA)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </DashboardLayout>
+  )
+}
